@@ -1,5 +1,6 @@
 // ==========================================
-// Fruit Merge Game - Backend Server
+// Fruit Merge Game - Backend Server v2.0
+// Added: Admin Dashboard & Analytics
 // ==========================================
 
 require('dotenv').config();
@@ -15,58 +16,152 @@ const PORT = process.env.PORT || 3000;
 // ==========================================
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const WEBAPP_URL = process.env.WEBAPP_URL || 'https://your-game.vercel.app';
+const WEBAPP_URL = process.env.WEBAPP_URL || 'https://fruit-merge-game-kappa.vercel.app';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';  // CHANGE THIS!
+const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || null;
 
-// Validate bot token
 if (!BOT_TOKEN) {
-    console.error('ERROR: BOT_TOKEN is not set in environment variables!');
-    console.error('Please set BOT_TOKEN in your .env file or environment');
+    console.error('ERROR: BOT_TOKEN is not set!');
     process.exit(1);
 }
 
-// Initialize bot (webhook mode for production)
 const bot = new TelegramBot(BOT_TOKEN);
 
 // ==========================================
 // Middleware
 // ==========================================
 
-app.use(cors({
-    origin: '*',  // In production, set to your game URL
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Request logging
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
     next();
 });
 
 // ==========================================
-// In-Memory Storage (Use database in production)
+// Analytics Storage
 // ==========================================
 
-const leaderboard = [];
-const userPurchases = {};  // { odairy: { revive: 5, ... } }
-const referrals = {};      // { odairy: { count: 0, earnings: 0 } }
+const analytics = {
+    onlineUsers: new Map(),
+    totalUsers: 0,
+    totalGamesPlayed: 0,
+    payments: [],
+    totalRevenue: 0,
+    leaderboard: [],
+    users: new Map(),
+    activityLog: []
+};
+
+// ==========================================
+// Helper Functions
+// ==========================================
+
+function addActivity(type, data) {
+    analytics.activityLog.unshift({
+        type,
+        data,
+        timestamp: Date.now()
+    });
+    if (analytics.activityLog.length > 100) {
+        analytics.activityLog = analytics.activityLog.slice(0, 100);
+    }
+}
+
+function cleanupOfflineUsers() {
+    const now = Date.now();
+    const OFFLINE_THRESHOLD = 5 * 60 * 1000;
+    
+    for (const [odairy, user] of analytics.onlineUsers) {
+        if (now - user.lastSeen > OFFLINE_THRESHOLD) {
+            analytics.onlineUsers.delete(odairy);
+            addActivity('user_offline', { odairy, username: user.username });
+        }
+    }
+}
+
+setInterval(cleanupOfflineUsers, 60 * 1000);
 
 // ==========================================
 // Health Check
 // ==========================================
 
 app.get('/', (req, res) => {
-    res.json({
-        status: 'ok',
-        message: 'Fruit Merge Backend is running',
-        version: '1.0.0'
+    res.json({ 
+        status: 'ok', 
+        message: 'Fruit Merge Backend v2.0',
+        onlineUsers: analytics.onlineUsers.size
     });
 });
 
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'healthy' });
+// ==========================================
+// User Tracking
+// ==========================================
+
+app.post('/api/heartbeat', (req, res) => {
+    const { userId, username, avatar, score } = req.body;
+    
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    
+    const now = Date.now();
+    
+    if (analytics.onlineUsers.has(userId)) {
+        const user = analytics.onlineUsers.get(userId);
+        user.lastSeen = now;
+        user.score = score || user.score;
+    } else {
+        analytics.onlineUsers.set(userId, {
+            userId,
+            username: username || 'Player',
+            avatar: avatar || '🎮',
+            lastSeen: now,
+            joinedAt: now,
+            score: score || 0
+        });
+        addActivity('user_online', { userId, username });
+    }
+    
+    if (!analytics.users.has(userId)) {
+        analytics.totalUsers++;
+        analytics.users.set(userId, {
+            userId,
+            username: username || 'Player',
+            avatar: avatar || '🎮',
+            firstSeen: now,
+            lastSeen: now,
+            gamesPlayed: 0,
+            highScore: 0,
+            totalSpent: 0
+        });
+        addActivity('new_user', { userId, username });
+    } else {
+        const user = analytics.users.get(userId);
+        user.lastSeen = now;
+        user.username = username || user.username;
+    }
+    
+    res.json({ success: true, onlineCount: analytics.onlineUsers.size });
+});
+
+app.post('/api/game/start', (req, res) => {
+    const { userId, username } = req.body;
+    analytics.totalGamesPlayed++;
+    if (analytics.users.has(userId)) {
+        analytics.users.get(userId).gamesPlayed++;
+    }
+    addActivity('game_start', { userId, username });
+    res.json({ success: true });
+});
+
+app.post('/api/game/end', (req, res) => {
+    const { userId, username, score } = req.body;
+    if (analytics.users.has(userId)) {
+        const user = analytics.users.get(userId);
+        if (score > user.highScore) user.highScore = score;
+    }
+    addActivity('game_end', { userId, username, score });
+    res.json({ success: true });
 });
 
 // ==========================================
@@ -76,275 +171,154 @@ app.get('/api/health', (req, res) => {
 app.post('/api/webhook', async (req, res) => {
     try {
         const update = req.body;
-
-        // Handle pre-checkout query (approve payment)
+        
         if (update.pre_checkout_query) {
-            console.log('[Payment] Pre-checkout query received:', update.pre_checkout_query.id);
-
             await bot.answerPreCheckoutQuery(update.pre_checkout_query.id, true);
-            console.log('[Payment] Pre-checkout approved');
         }
-
-        // Handle successful payment
+        
         if (update.message?.successful_payment) {
             const payment = update.message.successful_payment;
-            const userId = update.message.from.id;
-
-            console.log('[Payment] Successful payment:', {
-                odairy: userId,
+            const user = update.message.from;
+            
+            const record = {
+                userId: user.id,
+                username: user.first_name + (user.last_name ? ' ' + user.last_name : ''),
                 amount: payment.total_amount,
-                payload: payment.invoice_payload
-            });
-
-            // Grant the purchased item
-            grantPurchase(userId, payment.invoice_payload);
+                currency: payment.currency,
+                item: payment.invoice_payload,
+                timestamp: Date.now()
+            };
+            
+            analytics.payments.push(record);
+            analytics.totalRevenue += payment.total_amount;
+            
+            if (analytics.users.has(user.id)) {
+                analytics.users.get(user.id).totalSpent += payment.total_amount;
+            }
+            
+            addActivity('payment', record);
+            
+            if (ADMIN_TELEGRAM_ID) {
+                bot.sendMessage(ADMIN_TELEGRAM_ID, 
+                    `💰 Payment!\n${record.username}\n${payment.total_amount} ${payment.currency}\n${payment.invoice_payload}`
+                ).catch(e => {});
+            }
         }
-
-        // Handle /start command
+        
         if (update.message?.text?.startsWith('/start')) {
             const chatId = update.message.chat.id;
-            const startParam = update.message.text.split(' ')[1];  // Referral code
-
-            await bot.sendMessage(chatId,
-                '🍉 Welcome to Fruit Merge!\n\n' +
-                'Tap the button below to play:',
+            await bot.sendMessage(chatId, 
+                '🍉 Welcome to Fruit Merge!\n\nTap to play:',
                 {
                     reply_markup: {
-                        inline_keyboard: [[
-                            { text: '🎮 Play Now', web_app: { url: WEBAPP_URL } }
-                        ]]
+                        inline_keyboard: [[{ text: '🎮 Play', web_app: { url: WEBAPP_URL } }]]
                     }
                 }
             );
-
-            // Process referral if present
-            if (startParam) {
-                processReferral(startParam, update.message.from.id);
-            }
         }
-
+        
+        if (update.message?.text === '/stats' && ADMIN_TELEGRAM_ID && 
+            update.message.from.id.toString() === ADMIN_TELEGRAM_ID) {
+            await bot.sendMessage(update.message.chat.id,
+                `📊 Stats\n👥 Online: ${analytics.onlineUsers.size}\n👤 Total: ${analytics.totalUsers}\n🎮 Games: ${analytics.totalGamesPlayed}\n💰 Revenue: ${analytics.totalRevenue} XTR`
+            );
+        }
+        
         res.sendStatus(200);
     } catch (error) {
-        console.error('[Webhook] Error:', error);
-        res.sendStatus(200);  // Always return 200 to Telegram
+        console.error('[Webhook]', error);
+        res.sendStatus(200);
     }
 });
 
 // ==========================================
-// Payment Endpoints
+// Admin API
 // ==========================================
 
-// Create invoice link for Telegram Stars payment
+function adminAuth(req, res, next) {
+    const password = req.headers['x-admin-password'] || req.query.password;
+    if (password !== ADMIN_PASSWORD) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+}
+
+app.get('/api/admin/dashboard', adminAuth, (req, res) => {
+    cleanupOfflineUsers();
+    
+    const onlineList = Array.from(analytics.onlineUsers.values()).sort((a, b) => b.lastSeen - a.lastSeen);
+    const recentPayments = analytics.payments.slice(-20).reverse();
+    const topPlayers = Array.from(analytics.users.values()).sort((a, b) => b.highScore - a.highScore).slice(0, 10);
+    const topSpenders = Array.from(analytics.users.values()).filter(u => u.totalSpent > 0).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 10);
+    const recentActivity = analytics.activityLog.slice(0, 20);
+    
+    res.json({
+        stats: {
+            onlineUsers: analytics.onlineUsers.size,
+            totalUsers: analytics.totalUsers,
+            totalGamesPlayed: analytics.totalGamesPlayed,
+            totalRevenue: analytics.totalRevenue,
+            totalPayments: analytics.payments.length
+        },
+        onlineUsers: onlineList,
+        recentPayments,
+        topPlayers,
+        topSpenders,
+        recentActivity,
+        serverTime: Date.now()
+    });
+});
+
+app.get('/api/admin/users', adminAuth, (req, res) => {
+    const users = Array.from(analytics.users.values()).sort((a, b) => b.lastSeen - a.lastSeen);
+    res.json({ users, total: users.length });
+});
+
+app.get('/api/admin/payments', adminAuth, (req, res) => {
+    res.json({ payments: [...analytics.payments].reverse(), total: analytics.payments.length, totalRevenue: analytics.totalRevenue });
+});
+
+// ==========================================
+// Payment & Leaderboard
+// ==========================================
+
 app.post('/api/create-invoice', async (req, res) => {
     try {
         const { itemId, title, description, price, userId } = req.body;
-
-        console.log('[Invoice] Creating invoice:', { itemId, title, price, userId });
-
-        const invoiceLink = await bot.createInvoiceLink(
-            title,                    // Product title
-            description,              // Product description
-            `${itemId}:${userId}`,    // Payload (to identify purchase)
-            '',                       // Provider token (empty for Stars)
-            'XTR',                    // Currency (XTR = Telegram Stars)
-            [{ label: title, amount: price }]  // Price
-        );
-
-        console.log('[Invoice] Created:', invoiceLink);
-
-        res.json({
-            success: true,
-            invoiceLink
-        });
+        const invoiceLink = await bot.createInvoiceLink(title, description, `${itemId}:${userId}`, '', 'XTR', [{ label: title, amount: price }]);
+        res.json({ success: true, invoiceLink });
     } catch (error) {
-        console.error('[Invoice] Error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// Grant purchase to user
-function grantPurchase(userId, payload) {
-    const [itemId] = payload.split(':');
-
-    if (!userPurchases[userId]) {
-        userPurchases[userId] = {};
-    }
-
-    userPurchases[userId][itemId] = (userPurchases[userId][itemId] || 0) + 1;
-
-    console.log('[Purchase] Granted:', { userId, itemId, total: userPurchases[userId][itemId] });
-}
-
-// Get user's purchases
-app.get('/api/purchases/:userId', (req, res) => {
-    const userId = req.params.userId;
-    res.json(userPurchases[userId] || {});
-});
-
-// ==========================================
-// Leaderboard Endpoints
-// ==========================================
-
-// Submit score
-app.post('/api/leaderboard/submit', (req, res) => {
-    try {
-        const { odairy, username, score, avatar } = req.body;
-
-        // Find existing entry
-        const existingIndex = leaderboard.findIndex(e => e.odairy === odairy);
-
-        if (existingIndex !== -1) {
-            // Update if new score is higher
-            if (score > leaderboard[existingIndex].score) {
-                leaderboard[existingIndex].score = score;
-                leaderboard[existingIndex].username = username;
-                leaderboard[existingIndex].updatedAt = Date.now();
-            }
-        } else {
-            // Add new entry
-            leaderboard.push({
-                odairy,
-                username: username || 'Player',
-                score,
-                avatar: avatar || '🎮',
-                createdAt: Date.now(),
-                updatedAt: Date.now()
-            });
-        }
-
-        // Sort by score (highest first)
-        leaderboard.sort((a, b) => b.score - a.score);
-
-        // Find user's rank
-        const rank = leaderboard.findIndex(e => e.odairy === odairy) + 1;
-
-        res.json({
-            success: true,
-            rank,
-            totalPlayers: leaderboard.length
-        });
-    } catch (error) {
-        console.error('[Leaderboard] Submit error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Get leaderboard
+app.post('/api/leaderboard/submit', (req, res) => {
+    const { userId, username, score, avatar } = req.body;
+    const idx = analytics.leaderboard.findIndex(e => e.userId === userId);
+    
+    if (idx !== -1) {
+        if (score > analytics.leaderboard[idx].score) {
+            analytics.leaderboard[idx].score = score;
+            analytics.leaderboard[idx].username = username;
+        }
+    } else {
+        analytics.leaderboard.push({ userId, username: username || 'Player', score, avatar: avatar || '🎮' });
+    }
+    
+    analytics.leaderboard.sort((a, b) => b.score - a.score);
+    const rank = analytics.leaderboard.findIndex(e => e.userId === userId) + 1;
+    res.json({ success: true, rank });
+});
+
 app.get('/api/leaderboard', (req, res) => {
-    const limit = parseInt(req.query.limit) || 100;
-    const type = req.query.type || 'global';
-
-    let data = leaderboard.slice(0, limit);
-
-    // For weekly, filter by date (last 7 days)
-    if (type === 'weekly') {
-        const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-        data = leaderboard
-            .filter(e => e.updatedAt > weekAgo)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit);
-    }
-
-    res.json(data);
-});
-
-// Get user's rank
-app.get('/api/leaderboard/rank/:userId', (req, res) => {
-    const userId = req.params.userId;
-    const rank = leaderboard.findIndex(e => e.odairy === userId) + 1;
-    const entry = leaderboard.find(e => e.odairy === userId);
-
-    res.json({
-        rank: rank || null,
-        score: entry?.score || 0,
-        totalPlayers: leaderboard.length
-    });
+    res.json(analytics.leaderboard.slice(0, 100));
 });
 
 // ==========================================
-// Referral Endpoints
-// ==========================================
-
-// Process referral
-function processReferral(referrerId, newUserId) {
-    // Don't process self-referral
-    if (referrerId === newUserId.toString()) return;
-
-    if (!referrals[referrerId]) {
-        referrals[referrerId] = { count: 0, earnings: 0 };
-    }
-
-    referrals[referrerId].count++;
-    referrals[referrerId].earnings += 50;  // 50 stars per referral
-
-    console.log('[Referral] Processed:', { referrerId, newUserId, total: referrals[referrerId] });
-}
-
-// Get referral stats
-app.get('/api/referral/:userId', (req, res) => {
-    const userId = req.params.userId;
-    res.json(referrals[userId] || { count: 0, earnings: 0 });
-});
-
-// ==========================================
-// Validate Telegram Init Data (Security)
-// ==========================================
-
-const crypto = require('crypto');
-
-function validateInitData(initData) {
-    if (!initData) return false;
-
-    const params = new URLSearchParams(initData);
-    const hash = params.get('hash');
-    params.delete('hash');
-
-    // Sort parameters
-    const dataCheckString = Array.from(params.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => `${key}=${value}`)
-        .join('\n');
-
-    // Create secret key
-    const secretKey = crypto
-        .createHmac('sha256', 'WebAppData')
-        .update(BOT_TOKEN)
-        .digest();
-
-    // Calculate hash
-    const calculatedHash = crypto
-        .createHmac('sha256', secretKey)
-        .update(dataCheckString)
-        .digest('hex');
-
-    return calculatedHash === hash;
-}
-
-// Validation middleware (use for sensitive endpoints)
-function authMiddleware(req, res, next) {
-    const initData = req.headers['x-telegram-init-data'];
-
-    if (!initData || !validateInitData(initData)) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    next();
-}
-
-// ==========================================
-// Start Server
+// Start
 // ==========================================
 
 app.listen(PORT, () => {
-    console.log('==========================================');
-    console.log(`🍉 Fruit Merge Backend`);
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📱 WebApp URL: ${WEBAPP_URL}`);
-    console.log('==========================================');
+    console.log(`🍉 Fruit Merge Backend v2.0 on port ${PORT}`);
+    console.log(`🔐 Admin: /api/admin/dashboard?password=${ADMIN_PASSWORD}`);
 });
-
-// Export for testing
-module.exports = app;

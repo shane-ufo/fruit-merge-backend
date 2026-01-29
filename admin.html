@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍉 Fruit Merge - Admin Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+        }
+        
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        h1 { text-align: center; margin-bottom: 30px; font-size: 28px; }
+        h1 span { color: #ffd700; }
+        
+        /* Login */
+        #login-section {
+            max-width: 400px;
+            margin: 100px auto;
+            background: rgba(255,255,255,0.1);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+        }
+        
+        #login-section h2 { margin-bottom: 20px; }
+        
+        #login-section input {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            font-size: 16px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        
+        #login-section input::placeholder { color: rgba(255,255,255,0.5); }
+        
+        #login-section button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        #login-section button:hover { opacity: 0.9; }
+        
+        .error { color: #ff6b6b; margin-top: 10px; }
+        
+        /* Dashboard */
+        #dashboard { display: none; }
+        
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+        }
+        
+        .stat-card .icon { font-size: 32px; margin-bottom: 10px; }
+        .stat-card .value { font-size: 36px; font-weight: bold; color: #ffd700; }
+        .stat-card .label { font-size: 14px; opacity: 0.7; margin-top: 5px; }
+        
+        /* Panels */
+        .panels {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        
+        .panel {
+            background: rgba(255,255,255,0.08);
+            border-radius: 15px;
+            padding: 20px;
+        }
+        
+        .panel h3 {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        /* Tables */
+        .table-scroll { max-height: 300px; overflow-y: auto; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        
+        th, td {
+            padding: 12px 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        th { opacity: 0.7; font-size: 12px; text-transform: uppercase; }
+        
+        tr:hover { background: rgba(255,255,255,0.05); }
+        
+        .online-dot {
+            width: 10px;
+            height: 10px;
+            background: #38ef7d;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .badge {
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .badge-payment { background: #38ef7d; color: #000; }
+        .badge-online { background: #667eea; }
+        .badge-game { background: #ffd700; color: #000; }
+        
+        /* Activity */
+        .activity-item {
+            padding: 10px;
+            border-left: 3px solid #667eea;
+            margin-bottom: 10px;
+            background: rgba(255,255,255,0.03);
+        }
+        
+        .activity-item .time {
+            font-size: 11px;
+            opacity: 0.5;
+        }
+        
+        /* Refresh */
+        .refresh-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+        }
+        
+        .refresh-bar button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #667eea;
+            color: white;
+            cursor: pointer;
+        }
+        
+        .auto-refresh { display: flex; align-items: center; gap: 10px; }
+        
+        #last-updated { font-size: 14px; opacity: 0.7; }
+        
+        /* Mobile */
+        @media (max-width: 768px) {
+            .panels { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .stat-card .value { font-size: 28px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Section -->
+        <div id="login-section">
+            <h2>🔐 Admin Login</h2>
+            <input type="password" id="password-input" placeholder="Enter admin password">
+            <button onclick="login()">Login</button>
+            <div class="error" id="login-error"></div>
+        </div>
+        
+        <!-- Dashboard Section -->
+        <div id="dashboard">
+            <h1>🍉 Fruit Merge <span>Admin Dashboard</span></h1>
+            
+            <div class="refresh-bar">
+                <span id="last-updated">Last updated: --</span>
+                <div class="auto-refresh">
+                    <label>
+                        <input type="checkbox" id="auto-refresh" checked> Auto-refresh (30s)
+                    </label>
+                    <button onclick="fetchData()">🔄 Refresh Now</button>
+                </div>
+            </div>
+            
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="icon">👥</div>
+                    <div class="value" id="stat-online">0</div>
+                    <div class="label">Online Now</div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon">👤</div>
+                    <div class="value" id="stat-total-users">0</div>
+                    <div class="label">Total Users</div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon">🎮</div>
+                    <div class="value" id="stat-games">0</div>
+                    <div class="label">Games Played</div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon">💰</div>
+                    <div class="value" id="stat-revenue">0</div>
+                    <div class="label">Revenue (XTR)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon">💳</div>
+                    <div class="value" id="stat-payments">0</div>
+                    <div class="label">Total Payments</div>
+                </div>
+            </div>
+            
+            <!-- Panels -->
+            <div class="panels">
+                <!-- Online Users -->
+                <div class="panel">
+                    <h3>👥 Online Users</h3>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Score</th>
+                                    <th>Online For</th>
+                                </tr>
+                            </thead>
+                            <tbody id="online-users-table"></tbody>
+                        </table>
+                    </div>
+                    <div id="no-online" style="text-align:center; padding:20px; opacity:0.5;">No users online</div>
+                </div>
+                
+                <!-- Recent Payments -->
+                <div class="panel">
+                    <h3>💰 Recent Payments</h3>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Item</th>
+                                    <th>Amount</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="payments-table"></tbody>
+                        </table>
+                    </div>
+                    <div id="no-payments" style="text-align:center; padding:20px; opacity:0.5;">No payments yet</div>
+                </div>
+                
+                <!-- Top Players -->
+                <div class="panel">
+                    <h3>🏆 Top Players</h3>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Player</th>
+                                    <th>High Score</th>
+                                    <th>Games</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-players-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Top Spenders -->
+                <div class="panel">
+                    <h3>💎 Top Spenders</h3>
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>User</th>
+                                    <th>Total Spent</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-spenders-table"></tbody>
+                        </table>
+                    </div>
+                    <div id="no-spenders" style="text-align:center; padding:20px; opacity:0.5;">No purchases yet</div>
+                </div>
+                
+                <!-- Activity Log -->
+                <div class="panel" style="grid-column: span 2;">
+                    <h3>📋 Recent Activity</h3>
+                    <div class="table-scroll" id="activity-log"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Configuration - CHANGE THIS TO YOUR BACKEND URL
+        const BACKEND_URL = 'https://fruit-merge-backend-7p5k.onrender.com';
+        
+        let adminPassword = '';
+        let refreshInterval = null;
+        
+        // Login
+        function login() {
+            adminPassword = document.getElementById('password-input').value;
+            
+            fetch(`${BACKEND_URL}/api/admin/dashboard?password=${adminPassword}`)
+                .then(r => {
+                    if (r.status === 401) throw new Error('Wrong password');
+                    return r.json();
+                })
+                .then(data => {
+                    document.getElementById('login-section').style.display = 'none';
+                    document.getElementById('dashboard').style.display = 'block';
+                    updateDashboard(data);
+                    startAutoRefresh();
+                })
+                .catch(err => {
+                    document.getElementById('login-error').textContent = err.message;
+                });
+        }
+        
+        // Enter key to login
+        document.getElementById('password-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') login();
+        });
+        
+        // Fetch dashboard data
+        function fetchData() {
+            fetch(`${BACKEND_URL}/api/admin/dashboard?password=${adminPassword}`)
+                .then(r => r.json())
+                .then(updateDashboard)
+                .catch(err => console.error('Fetch error:', err));
+        }
+        
+        // Update dashboard UI
+        function updateDashboard(data) {
+            const { stats, onlineUsers, recentPayments, topPlayers, topSpenders, recentActivity } = data;
+            
+            // Stats
+            document.getElementById('stat-online').textContent = stats.onlineUsers;
+            document.getElementById('stat-total-users').textContent = stats.totalUsers;
+            document.getElementById('stat-games').textContent = stats.totalGamesPlayed;
+            document.getElementById('stat-revenue').textContent = stats.totalRevenue;
+            document.getElementById('stat-payments').textContent = stats.totalPayments;
+            
+            // Online Users
+            const onlineTable = document.getElementById('online-users-table');
+            document.getElementById('no-online').style.display = onlineUsers.length ? 'none' : 'block';
+            onlineTable.innerHTML = onlineUsers.map(u => `
+                <tr>
+                    <td><span class="online-dot"></span>${u.avatar || '🎮'} ${u.username}</td>
+                    <td>${u.score || 0}</td>
+                    <td>${formatDuration(Date.now() - u.joinedAt)}</td>
+                </tr>
+            `).join('');
+            
+            // Recent Payments
+            const paymentsTable = document.getElementById('payments-table');
+            document.getElementById('no-payments').style.display = recentPayments.length ? 'none' : 'block';
+            paymentsTable.innerHTML = recentPayments.map(p => `
+                <tr>
+                    <td>${p.username}</td>
+                    <td>${p.item?.split(':')[0] || 'item'}</td>
+                    <td><span class="badge badge-payment">${p.amount} ${p.currency || 'XTR'}</span></td>
+                    <td>${formatTime(p.timestamp)}</td>
+                </tr>
+            `).join('');
+            
+            // Top Players
+            const playersTable = document.getElementById('top-players-table');
+            playersTable.innerHTML = topPlayers.map((p, i) => `
+                <tr>
+                    <td>${i < 3 ? ['🥇','🥈','🥉'][i] : i+1}</td>
+                    <td>${p.avatar || '🎮'} ${p.username}</td>
+                    <td style="color:#ffd700;font-weight:bold">${p.highScore}</td>
+                    <td>${p.gamesPlayed}</td>
+                </tr>
+            `).join('');
+            
+            // Top Spenders
+            const spendersTable = document.getElementById('top-spenders-table');
+            document.getElementById('no-spenders').style.display = topSpenders.length ? 'none' : 'block';
+            spendersTable.innerHTML = topSpenders.map((s, i) => `
+                <tr>
+                    <td>${i+1}</td>
+                    <td>${s.username}</td>
+                    <td style="color:#38ef7d;font-weight:bold">${s.totalSpent} XTR</td>
+                </tr>
+            `).join('');
+            
+            // Activity Log
+            const activityLog = document.getElementById('activity-log');
+            activityLog.innerHTML = recentActivity.map(a => `
+                <div class="activity-item">
+                    <span class="badge badge-${getBadgeType(a.type)}">${a.type}</span>
+                    ${formatActivity(a)}
+                    <div class="time">${formatTime(a.timestamp)}</div>
+                </div>
+            `).join('');
+            
+            // Last updated
+            document.getElementById('last-updated').textContent = 
+                `Last updated: ${new Date().toLocaleTimeString()}`;
+        }
+        
+        // Auto refresh
+        function startAutoRefresh() {
+            if (refreshInterval) clearInterval(refreshInterval);
+            
+            const checkbox = document.getElementById('auto-refresh');
+            if (checkbox.checked) {
+                refreshInterval = setInterval(fetchData, 30000);
+            }
+            
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                    refreshInterval = setInterval(fetchData, 30000);
+                } else {
+                    clearInterval(refreshInterval);
+                }
+            });
+        }
+        
+        // Helpers
+        function formatTime(ts) {
+            if (!ts) return '--';
+            const date = new Date(ts);
+            return date.toLocaleTimeString();
+        }
+        
+        function formatDuration(ms) {
+            const mins = Math.floor(ms / 60000);
+            if (mins < 60) return `${mins}m`;
+            const hours = Math.floor(mins / 60);
+            return `${hours}h ${mins % 60}m`;
+        }
+        
+        function getBadgeType(type) {
+            if (type.includes('payment')) return 'payment';
+            if (type.includes('online')) return 'online';
+            if (type.includes('game')) return 'game';
+            return 'online';
+        }
+        
+        function formatActivity(a) {
+            const d = a.data || {};
+            switch(a.type) {
+                case 'payment': return `${d.username} paid ${d.amount} for ${d.item?.split(':')[0]}`;
+                case 'user_online': return `${d.username || d.userId} came online`;
+                case 'user_offline': return `${d.username || d.userId} went offline`;
+                case 'new_user': return `New user: ${d.username || d.userId}`;
+                case 'game_start': return `${d.username || d.userId} started a game`;
+                case 'game_end': return `${d.username || d.userId} scored ${d.score}`;
+                default: return JSON.stringify(d);
+            }
+        }
+    </script>
+</body>
+</html>
