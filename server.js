@@ -474,6 +474,59 @@ app.post('/api/referral', (req, res) => {
 });
 
 // ==========================================
+// Cheat Detection & Reporting
+// ==========================================
+
+const cheatReports = [];
+
+app.post('/api/report-cheat', (req, res) => {
+    const { odairy, reason, time } = req.body;
+    
+    const report = {
+        odairy: String(odairy),
+        reason,
+        time: time || Date.now(),
+        ip: req.ip
+    };
+    
+    cheatReports.push(report);
+    
+    // Keep last 100 reports
+    if (cheatReports.length > 100) {
+        cheatReports.shift();
+    }
+    
+    console.log(`[CHEAT] User ${odairy}: ${reason}`);
+    
+    // Notify admin
+    if (ADMIN_TELEGRAM_ID) {
+        bot.sendMessage(ADMIN_TELEGRAM_ID, 
+            `⚠️ Cheat detected!\n\nUser: ${odairy}\nReason: ${reason}`
+        ).catch(() => {});
+    }
+    
+    res.json({ ok: true });
+});
+
+// Get cheat reports (admin only)
+app.get('/api/admin/cheats', adminAuth, (req, res) => {
+    res.json({ reports: cheatReports });
+});
+
+// Validate score submission (server-side anti-cheat)
+function validateScore(score, gamesPlayed) {
+    // Max possible score per game is roughly 10000
+    // If score is way higher than games played would allow, it's suspicious
+    const maxReasonableScore = (gamesPlayed || 1) * 15000;
+    
+    if (score > maxReasonableScore && score > 50000) {
+        return false;
+    }
+    
+    return true;
+}
+
+// ==========================================
 // Star Packages
 // ==========================================
 
