@@ -513,6 +513,78 @@ app.get('/api/admin/cheats', adminAuth, (req, res) => {
     res.json({ reports: cheatReports });
 });
 
+// Clear all data (admin only) - 清理重复用户
+app.post('/api/admin/clear-duplicates', adminAuth, (req, res) => {
+    // 只保留有真实 Telegram ID 的用户（数字 ID）
+    const beforeCount = db.users.size;
+    
+    // 找出所有 guest 用户
+    const guestUsers = [];
+    const realUsers = [];
+    
+    for (const [odairy, user] of db.users) {
+        if (odairy.startsWith('guest_') || odairy.startsWith('G') || isNaN(parseInt(odairy))) {
+            guestUsers.push(odairy);
+        } else {
+            realUsers.push(odairy);
+        }
+    }
+    
+    // 可选：删除 guest 用户
+    // guestUsers.forEach(id => db.users.delete(id));
+    
+    res.json({ 
+        success: true, 
+        before: beforeCount,
+        after: db.users.size,
+        guestUsers: guestUsers.length,
+        realUsers: realUsers.length,
+        message: `Found ${guestUsers.length} guest users and ${realUsers.length} real users`
+    });
+});
+
+// Reset all data (admin only) - 完全重置
+app.post('/api/admin/reset-all', adminAuth, (req, res) => {
+    const { confirm } = req.body;
+    
+    if (confirm !== 'RESET_ALL_DATA') {
+        return res.status(400).json({ error: 'Send { confirm: "RESET_ALL_DATA" } to confirm' });
+    }
+    
+    // 清空所有数据
+    db.users.clear();
+    db.usernames.clear();
+    db.payments.length = 0;
+    db.leaderboard.length = 0;
+    db.friends.clear();
+    db.activityLog.length = 0;
+    db.onlineUsers.clear();
+    db.stats = { totalUsers: 0, totalGamesPlayed: 0, totalRevenue: 0 };
+    
+    saveData();
+    
+    res.json({ success: true, message: 'All data has been reset' });
+});
+
+// Delete specific user (admin only)
+app.delete('/api/admin/user/:odairy', adminAuth, (req, res) => {
+    const { odairy } = req.params;
+    
+    if (db.users.has(odairy)) {
+        db.users.delete(odairy);
+        db.onlineUsers.delete(odairy);
+        
+        // Remove from leaderboard
+        const idx = db.leaderboard.findIndex(e => e.odairy === odairy);
+        if (idx !== -1) db.leaderboard.splice(idx, 1);
+        
+        saveData();
+        res.json({ success: true, message: `User ${odairy} deleted` });
+    } else {
+        res.status(404).json({ error: 'User not found' });
+    }
+});
+
 // Validate score submission (server-side anti-cheat)
 function validateScore(score, gamesPlayed) {
     // Max possible score per game is roughly 10000
